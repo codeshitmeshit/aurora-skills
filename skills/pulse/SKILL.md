@@ -112,7 +112,7 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 
 ### Step 5: 天气数据
 
-**数据源**：使用 `prefetch.weather`。每个城市包含 `now`（实况）、`today` 和 `tomorrow`，各有 `high`、`low`、`desc`、`emoji`、`wind`。天气数据来自高德天气 API。
+**数据源**：使用 `prefetch.weather`。每个城市（北京海淀/杭州西湖/深圳南山/广州番禺）包含 `now`（实况）、`today` 和 `tomorrow`，各有 `high`、`low`、`desc`、`emoji`、`wind`。天气数据来自高德天气 API（区级精度）。
 
 格式：列表（非表格），每个城市显示今明两天，含 emoji、描述、低温°C ~ 高温°C。
 
@@ -185,19 +185,21 @@ shownotes 摘要（1-2 句简体中文重点总结）。
 
 ## 🌤️ Weather
 
-**🧱 北京**
-- 今天：{emoji} {type}，{low}°C ~ {high}°C
-- 明天：{emoji} {type}，{low}°C ~ {high}°C
+**🧱 北京·海淀**
+- 实况：{emoji} {desc}，{temp}°C
+- 今天：{emoji} {desc}，{low}°C ~ {high}°C
+- 明天：{emoji} {desc}，{low}°C ~ {high}°C
 
-**🏙️ 上海**
-- 今天：{emoji} {type}，{low}°C ~ {high}°C
-- 明天：{emoji} {type}，{low}°C ~ {high}°C
+**🏙️ 杭州·西湖**
+- 实况 / 今天 / 明天（同上格式）
 
-**🌿 南京**
-- 今天：{emoji} {type}，{low}°C ~ {high}°C
-- 明天：{emoji} {type}，{low}°C ~ {high}°C
+**🌊 深圳·南山**
+- 实况 / 今天 / 明天（同上格式）
 
-{综合三座城市天气，给出雨伞、洗车等建议}
+**🌺 广州·番禺**
+- 实况 / 今天 / 明天（同上格式）
+
+{综合四座城市天气，给出雨伞、防晒、洗车等建议}
 
 ---
 

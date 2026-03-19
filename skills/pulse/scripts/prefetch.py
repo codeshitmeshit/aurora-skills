@@ -37,11 +37,12 @@ TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 AMAP_WEATHER_KEY = os.environ.get("AMAP_WEATHER_KEY", "78f3c9d4942fad46113f9fa136cea50f")
 
-# 高德天气城市 adcode 映射
+# 高德天气城市映射（区级实况 + 市级预报）
 AMAP_CITIES = {
-    "beijing":  {"adcode": "110000", "name": "北京"},
-    "shanghai": {"adcode": "310000", "name": "上海"},
-    "nanjing":  {"adcode": "320100", "name": "南京"},
+    "beijing_haidian":   {"adcode": "110108", "city_adcode": "110000", "name": "北京·海淀"},
+    "hangzhou_xihu":     {"adcode": "330106", "city_adcode": "330100", "name": "杭州·西湖"},
+    "shenzhen_nanshan":  {"adcode": "440305", "city_adcode": "440300", "name": "深圳·南山"},
+    "guangzhou_panyu":   {"adcode": "440113", "city_adcode": "440100", "name": "广州·番禺"},
 }
 
 # 天气描述 → emoji 映射（高德天气中文描述）
@@ -75,8 +76,9 @@ async def fetch_weather_amap(session: aiohttp.ClientSession, city_key: str) -> d
     """Fetch weather from 高德天气 API (base + forecast)."""
     city_info = AMAP_CITIES[city_key]
     adcode = city_info["adcode"]
+    city_adcode = city_info.get("city_adcode", adcode)
 
-    # 实况天气 (base)
+    # 实况天气 (base) — 区级精度
     base_url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={adcode}&key={AMAP_WEATHER_KEY}&extensions=base"
 
     async with session.get(base_url) as resp:
@@ -96,8 +98,9 @@ async def fetch_weather_amap(session: aiohttp.ClientSession, city_key: str) -> d
             "wind": f"{live.get('winddirection', '')}风 {live.get('windpower', '')}级",
         }
 
-    # 预报（今天 + 明天）— 单独请求
-    forecast_url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={adcode}&key={AMAP_WEATHER_KEY}&extensions=all"
+    # 预报（今天 + 明天）— 用市级 adcode（区级 forecast 有时不返回）
+    await asyncio.sleep(0.3)  # 高德 API 限频，base 和 forecast 之间加间隔
+    forecast_url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={city_adcode}&key={AMAP_WEATHER_KEY}&extensions=all"
     async with session.get(forecast_url) as resp:
         forecast_data = await resp.json(content_type=None)
 
@@ -375,15 +378,12 @@ async def main():
     loop = asyncio.get_event_loop()
 
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-        # Launch all async fetchers in parallel
+        # Launch non-weather fetchers in parallel
         tasks = {
             "producthunt": fetch_producthunt(session),
             "github_trending": fetch_github_trending(session),
             "hacker_news": fetch_hacker_news(session),
             "podcasts": fetch_podcasts(session),
-            "weather_beijing": fetch_weather_amap(session, "beijing"),
-            "weather_shanghai": fetch_weather_amap(session, "shanghai"),
-            "weather_nanjing": fetch_weather_amap(session, "nanjing"),
         }
 
         keys = list(tasks.keys())
@@ -394,12 +394,16 @@ async def main():
             if isinstance(res, Exception):
                 result["errors"][key] = str(res)
                 continue
+            result[key] = res
 
-            if key.startswith("weather_"):
-                city = key.replace("weather_", "")
-                result["weather"][city] = res
-            else:
-                result[key] = res
+        # Weather: fetch sequentially with small delay (高德 API rate limit)
+        for city_key in AMAP_CITIES:
+            try:
+                weather_data = await fetch_weather_amap(session, city_key)
+                result["weather"][city_key] = weather_data
+            except Exception as e:
+                result["errors"][f"weather_{city_key}"] = str(e)
+            await asyncio.sleep(0.5)
 
     # Sync: Volcengine news search (runs in thread)
     if VOLCENGINE_API_KEY and VOLCENGINE_BOT_ID:
