@@ -51,7 +51,7 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 
 **数据源**：使用 `prefetch.producthunt.items` 数组。回退：仅在预取出错时 `web_fetch` `https://www.producthunt.com/feed`。
 
-1. 从列表中挑选 **Top 3-5 个 AI 相关产品**（AI 工具、LLM、ML 基础设施、AI Agent、AIGC 等）。如果 AI 产品不足 3 个，用整体 Top 产品补充。
+1. 从列表中挑选 **Top 3-5 个 AI 相关产品**（AI 工具、LLM、ML 基础设施、AI Agent、AIGC、开发者工具、Golang/云原生工具等）。如果 AI 产品不足 3 个，用整体 Top 产品补充。
 2. 每个产品收集：产品名、一句话描述、投票数（如有）、直链。
 3. 写一句简短点评——为什么值得关注。
 
@@ -64,7 +64,7 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 **数据源**：使用 `prefetch.github_trending` 数组。每项包含 `name`、`description`、`language`、`stars_today`、`total_stars`、`url`。
 
 1. 使用预取数据的前 5 个仓库。
-2. 如果与用户兴趣相关（AI Agent、TypeScript、Python、Rust、云原生等），添加简短点评。
+2. 如果与用户兴趣相关（AI Agent、TypeScript、Python、Golang、Rust、云原生等），添加简短点评。
 
 ---
 
@@ -110,7 +110,16 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 
 ---
 
-### Step 5: 天气数据
+### Step 5: 加密货币行情
+
+**数据源**：使用 `prefetch.crypto.ETH`（火山引擎搜索结果）。包含 `content`（ETH 实时行情摘要）。
+
+从 content 中提取：当前价格（USD）、24h 涨跌幅、24h 最高/最低价。
+如果 24h 涨跌幅 > 5% 或 < -5%，标注为异常波动。
+
+---
+
+### Step 6: 天气数据
 
 **数据源**：使用 `prefetch.weather`。每个城市（北京海淀/杭州西湖/深圳南山/广州番禺）包含 `now`（实况）、`today` 和 `tomorrow`，各有 `high`、`low`、`desc`、`emoji`、`wind`。天气数据来自高德天气 API（区级精度）。
 
@@ -118,7 +127,7 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 
 ---
 
-### Step 6: 去重检查
+### Step 7: 去重检查
 
 组装最终输出前：
 
@@ -128,7 +137,7 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 
 ---
 
-### Step 7: 组装输出
+### Step 8: 组装输出
 
 > **关键——输出以标题开始，不加任何前言。**
 > 第一个字符必须是 `#`。不要有前导文字、状态更新、"数据已收集完毕"、"正在整理"等过渡句。
@@ -180,6 +189,17 @@ Description。{Language}。简短点评（简体中文）。
 
 - **[节目名 - 单集标题](episode_url)**
 shownotes 摘要（1-2 句简体中文重点总结）。
+
+---
+
+## 💰 Crypto
+
+**Ethereum (ETH)**
+- 当前价格：**${price}**
+- 24h 涨跌：{emoji} **{change_pct}%**
+- 24h 范围：${low} ~ ${high}
+
+{if 涨跌 > 5% 或 < -5%: ⚠️ 异常波动提示}
 
 ---
 

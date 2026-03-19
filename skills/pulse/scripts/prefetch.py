@@ -405,8 +405,9 @@ async def main():
                 result["errors"][f"weather_{city_key}"] = str(e)
             await asyncio.sleep(0.5)
 
-    # Sync: Volcengine news search (runs in thread)
+    # Sync: Volcengine searches (runs in thread pool)
     if VOLCENGINE_API_KEY and VOLCENGINE_BOT_ID:
+        # News search
         try:
             news_result = await loop.run_in_executor(
                 None,
@@ -416,6 +417,17 @@ async def main():
             result["news_search"] = news_result
         except Exception as e:
             result["errors"]["news_search"] = str(e)
+
+        # ETH price search
+        try:
+            eth_result = await loop.run_in_executor(
+                None,
+                volcengine_search_sync,
+                f"以太坊ETH今日{today_str}实时价格行情，包含当前价格（美元）、24小时涨跌幅、24小时最高最低价。只需要数据，不需要投资建议。"
+            )
+            result["crypto"] = {"ETH": eth_result}
+        except Exception as e:
+            result["errors"]["crypto"] = str(e)
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
 
