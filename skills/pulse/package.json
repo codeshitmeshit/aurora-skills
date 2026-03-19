@@ -1,0 +1,12 @@
+{
+  "name": "aurora-pulse",
+  "version": "0.1.0",
+  "description": "📡 Pulse — Daily information briefing skill for OpenClaw",
+  "keywords": ["openclaw", "skill", "pulse", "daily-briefing", "news"],
+  "author": "codeshitmeshit",
+  "license": "MIT",
+  "openclaw": {
+    "type": "skill",
+    "triggers": ["pulse", "/pulse", "简报", "早报", "晚报"]
+  }
+}
