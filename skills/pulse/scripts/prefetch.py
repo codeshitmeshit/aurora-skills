@@ -6,18 +6,24 @@ Outputs a single JSON blob to stdout.
 Usage:
     python3 prefetch.py
 
+Environment variables:
+    AMAP_WEATHER_KEY     — 高德天气 API Key (required for weather)
+    VOLCENGINE_SEARCH_API_KEY  — 火山引擎搜索 API Key (optional, for news)
+    VOLCENGINE_SEARCH_BOT_ID   — 火山引擎搜索 Bot ID (optional, for news)
+
 Dependencies:
-    pip install aiohttp feedparser requests
+    pip install aiohttp requests
 """
 
 import asyncio
 import json
+import os
 import re
 import sys
-import time
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
+import requests
 
 UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -25,18 +31,29 @@ UA = (
 )
 TIMEOUT = aiohttp.ClientTimeout(total=15)
 
-WEATHER_EMOJI = {
-    "Sunny": "☀️", "Clear": "☀️",
-    "Partly Cloudy": "⛅", "Partly cloudy": "⛅",
-    "Cloudy": "☁️", "Overcast": "☁️",
-    "Light rain": "🌧️", "Light rain shower": "🌧️",
-    "Moderate rain": "🌧️🌧️", "Heavy rain": "🌧️🌧️",
-    "Patchy light rain": "🌦️", "Light drizzle": "🌦️",
-    "Patchy rain possible": "🌦️", "Patchy rain nearby": "🌦️",
-    "Light snow": "❄️", "Moderate snow": "❄️",
-    "Heavy snow": "🌨️", "Blizzard": "🌨️",
-    "Thundery outbreaks possible": "⛈️", "Thunderstorm": "⛈️",
-    "Fog": "🌫️", "Mist": "🌫️", "Haze": "🌫️",
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+AMAP_WEATHER_KEY = os.environ.get("AMAP_WEATHER_KEY", "78f3c9d4942fad46113f9fa136cea50f")
+
+# 高德天气城市 adcode 映射
+AMAP_CITIES = {
+    "beijing":  {"adcode": "110000", "name": "北京"},
+    "shanghai": {"adcode": "310000", "name": "上海"},
+    "nanjing":  {"adcode": "320100", "name": "南京"},
+}
+
+# 天气描述 → emoji 映射（高德天气中文描述）
+WEATHER_EMOJI_CN = {
+    "晴": "☀️", "多云": "⛅", "阴": "☁️",
+    "小雨": "🌧️", "中雨": "🌧️🌧️", "大雨": "🌧️🌧️", "暴雨": "🌧️🌧️🌧️",
+    "阵雨": "🌦️", "雷阵雨": "⛈️", "雷阵雨并伴有冰雹": "⛈️",
+    "雨夹雪": "🌨️", "小雪": "❄️", "中雪": "❄️", "大雪": "🌨️", "暴雪": "🌨️",
+    "雾": "🌫️", "霾": "🌫️", "浮尘": "🌫️", "扬沙": "🌫️", "沙尘暴": "🌪️",
+    "强沙尘暴": "🌪️", "有风": "🌬️", "微风": "🌬️", "和风": "🌬️",
+    "清风": "🌬️", "强风": "💨", "疾风": "💨", "大风": "💨",
+    "烈风": "💨", "风暴": "🌪️", "狂暴风": "🌪️", "飓风": "🌪️",
 }
 
 PODCAST_URLS = [
@@ -45,68 +62,152 @@ PODCAST_URLS = [
     ("张小珺Jùn｜商业访谈录", "https://www.xiaoyuzhoufm.com/podcast/626b46ea9cbbf0451cf5a962"),
 ]
 
+# 火山引擎搜索配置
+VOLCENGINE_API_KEY = os.environ.get("VOLCENGINE_SEARCH_API_KEY", "")
+VOLCENGINE_BOT_ID = os.environ.get("VOLCENGINE_SEARCH_BOT_ID", "")
+
+
 # ---------------------------------------------------------------------------
-# Weather
+# Weather (高德天气 API)
 # ---------------------------------------------------------------------------
 
-async def fetch_weather(session: aiohttp.ClientSession, city: str) -> dict:
-    """Fetch weather from wttr.in."""
-    url = f"https://wttr.in/{city}?format=j1"
-    async with session.get(url) as resp:
-        data = await resp.json(content_type=None)
+async def fetch_weather_amap(session: aiohttp.ClientSession, city_key: str) -> dict:
+    """Fetch weather from 高德天气 API (base + forecast)."""
+    city_info = AMAP_CITIES[city_key]
+    adcode = city_info["adcode"]
 
-    result = {}
-    for i, label in enumerate(["today", "tomorrow"]):
-        day = data["weather"][i]
-        desc = day["hourly"][4]["weatherDesc"][0]["value"].strip()
-        emoji = WEATHER_EMOJI.get(desc, "🌡️")
-        result[label] = {
-            "high": int(day["maxtempC"]),
-            "low": int(day["mintempC"]),
+    # 实况天气 (base)
+    base_url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={adcode}&key={AMAP_WEATHER_KEY}&extensions=base"
+
+    async with session.get(base_url) as resp:
+        base_data = await resp.json(content_type=None)
+
+    result = {"city": city_info["name"]}
+
+    # 实况
+    if base_data.get("status") == "1" and base_data.get("lives"):
+        live = base_data["lives"][0]
+        desc = live.get("weather", "")
+        result["now"] = {
+            "temp": live.get("temperature", ""),
             "desc": desc,
-            "emoji": emoji,
+            "emoji": WEATHER_EMOJI_CN.get(desc, "🌡️"),
+            "humidity": live.get("humidity", ""),
+            "wind": f"{live.get('winddirection', '')}风 {live.get('windpower', '')}级",
         }
+
+    # 预报（今天 + 明天）— 单独请求
+    forecast_url = f"https://restapi.amap.com/v3/weather/weatherInfo?city={adcode}&key={AMAP_WEATHER_KEY}&extensions=all"
+    async with session.get(forecast_url) as resp:
+        forecast_data = await resp.json(content_type=None)
+
+    if forecast_data.get("status") == "1":
+        forecasts = forecast_data.get("forecasts", [])
+        if forecasts:
+            casts = forecasts[0].get("casts", [])
+            for i, label in enumerate(["today", "tomorrow"]):
+                if i < len(casts):
+                    day = casts[i]
+                    day_desc = day.get("dayweather", "")
+                    night_desc = day.get("nightweather", "")
+                    desc = day_desc if day_desc == night_desc else f"{day_desc}转{night_desc}"
+                    result[label] = {
+                        "high": day.get("daytemp", ""),
+                        "low": day.get("nighttemp", ""),
+                        "desc": desc,
+                        "emoji": WEATHER_EMOJI_CN.get(day_desc, "🌡️"),
+                        "wind": f"{day.get('daywind', '')}风 {day.get('daypower', '')}级",
+                        "date": day.get("date", ""),
+                    }
+
     return result
 
 
 # ---------------------------------------------------------------------------
-# Product Hunt
+# Volcengine Search (火山引擎联网搜索)
+# ---------------------------------------------------------------------------
+
+def volcengine_search_sync(query: str) -> dict:
+    """Search using Volcengine Search Web API (sync, runs in executor)."""
+    if not VOLCENGINE_API_KEY or not VOLCENGINE_BOT_ID:
+        return {"error": "VOLCENGINE credentials not configured"}
+
+    url = "https://open.feedcoopapi.com/agent_api/agent/chat/completion"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {VOLCENGINE_API_KEY}",
+    }
+    payload = {
+        "bot_id": VOLCENGINE_BOT_ID,
+        "stream": False,
+        "messages": [{"role": "user", "content": query}],
+    }
+
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        content = ""
+        references = []
+
+        # Extract content from choices
+        choices = data.get("choices", [])
+        if choices:
+            content = choices[0].get("message", {}).get("content", "")
+
+        # Extract references
+        refs = data.get("references", [])
+        for ref in refs[:8]:
+            references.append({
+                "title": ref.get("title", ""),
+                "url": ref.get("url", ""),
+                "source": ref.get("source_name", ""),
+            })
+
+        return {"content": content, "references": references}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Product Hunt (Atom Feed)
 # ---------------------------------------------------------------------------
 
 async def fetch_producthunt(session: aiohttp.ClientSession) -> dict:
-    """Fetch Product Hunt feed and extract product items."""
+    """Fetch Product Hunt Atom feed and parse entries."""
     url = "https://www.producthunt.com/feed"
     headers = {"User-Agent": UA}
     async with session.get(url, headers=headers) as resp:
-        html = await resp.text()
+        text = await resp.text()
         status = resp.status
 
-    # Extract product items from the page
     items = []
-    # Try to parse structured data from the HTML
-    name_matches = re.findall(
-        r'data-test="post-name"[^>]*>([^<]+)<', html
-    )
-    tagline_matches = re.findall(
-        r'data-test="post-tagline"[^>]*>([^<]+)<', html
-    )
-    link_matches = re.findall(
-        r'href="(/posts/[^"?]+)', html
-    )
+    # Parse Atom XML entries
+    entries = re.findall(r"<entry>(.*?)</entry>", text, re.DOTALL)
+    for entry in entries[:10]:
+        title_match = re.search(r"<title>(.*?)</title>", entry)
+        link_match = re.search(r'<link[^>]*href="([^"]+)"', entry)
+        content_match = re.search(r"<content[^>]*>(.*?)</content>", entry, re.DOTALL)
 
-    seen_links = set()
-    for i in range(min(len(name_matches), 15)):
-        link = f"https://www.producthunt.com{link_matches[i]}" if i < len(link_matches) else ""
-        if link in seen_links:
-            continue
-        seen_links.add(link)
-        items.append({
-            "name": name_matches[i].strip() if i < len(name_matches) else "",
-            "tagline": tagline_matches[i].strip() if i < len(tagline_matches) else "",
-            "url": link,
-        })
+        title = title_match.group(1).strip() if title_match else ""
+        link = link_match.group(1).strip() if link_match else ""
 
-    return {"items": items[:10], "status": status}
+        tagline = ""
+        if content_match:
+            # Extract tagline from <p> tag
+            p_match = re.search(r"&lt;p&gt;\s*(.*?)\s*&lt;/p&gt;", content_match.group(1))
+            if p_match:
+                tagline = p_match.group(1).strip()
+
+        if title:
+            items.append({
+                "name": title,
+                "tagline": tagline,
+                "url": link,
+            })
+
+    return {"items": items, "status": status}
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +222,7 @@ async def fetch_github_trending(session: aiohttp.ClientSession) -> list:
 
     repos = []
     articles = re.split(r'<article\s+class="Box-row"', html)
-    for article in articles[1:8]:  # top 7
+    for article in articles[1:8]:
         name_matches = re.findall(r'<a\s+href="(/[^"]+)"', article)
         full_name = ""
         for href in name_matches:
@@ -175,17 +276,9 @@ async def fetch_hacker_news(session: aiohttp.ClientSession) -> list:
     async with session.get("https://hacker-news.firebaseio.com/v0/topstories.json") as resp:
         ids = await resp.json()
 
-    items = []
-    tasks = []
-    for story_id in ids[:20]:
-        tasks.append(fetch_hn_item(session, story_id))
-
+    tasks = [fetch_hn_item(session, sid) for sid in ids[:20]]
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    for r in results:
-        if isinstance(r, dict) and r.get("title"):
-            items.append(r)
-
-    # Sort by score descending
+    items = [r for r in results if isinstance(r, dict) and r.get("title")]
     items.sort(key=lambda x: x.get("points", 0), reverse=True)
     return items[:10]
 
@@ -194,7 +287,6 @@ async def fetch_hn_item(session: aiohttp.ClientSession, item_id: int) -> dict:
     """Fetch a single HN item."""
     async with session.get(f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json") as resp:
         data = await resp.json()
-
     return {
         "title": data.get("title", ""),
         "url": data.get("url", f"https://news.ycombinator.com/item?id={item_id}"),
@@ -236,7 +328,6 @@ async def fetch_single_podcast(
         if not title or not eid:
             return None
 
-        # Check if within 48 hours
         if pub_date_str:
             try:
                 pub_date = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
@@ -269,26 +360,30 @@ async def fetch_podcasts(session: aiohttp.ClientSession) -> list:
 # ---------------------------------------------------------------------------
 
 async def main():
+    today_str = datetime.now().strftime("%Y年%m月%d日")
     result = {
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "producthunt": None,
         "github_trending": None,
         "hacker_news": None,
         "podcasts": None,
+        "news_search": None,
         "weather": {},
         "errors": {},
     }
 
+    loop = asyncio.get_event_loop()
+
     async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-        # Launch all fetchers in parallel
+        # Launch all async fetchers in parallel
         tasks = {
             "producthunt": fetch_producthunt(session),
             "github_trending": fetch_github_trending(session),
             "hacker_news": fetch_hacker_news(session),
             "podcasts": fetch_podcasts(session),
-            "weather_beijing": fetch_weather(session, "Beijing"),
-            "weather_shanghai": fetch_weather(session, "Shanghai"),
-            "weather_nanjing": fetch_weather(session, "Nanjing"),
+            "weather_beijing": fetch_weather_amap(session, "beijing"),
+            "weather_shanghai": fetch_weather_amap(session, "shanghai"),
+            "weather_nanjing": fetch_weather_amap(session, "nanjing"),
         }
 
         keys = list(tasks.keys())
@@ -305,6 +400,18 @@ async def main():
                 result["weather"][city] = res
             else:
                 result[key] = res
+
+    # Sync: Volcengine news search (runs in thread)
+    if VOLCENGINE_API_KEY and VOLCENGINE_BOT_ID:
+        try:
+            news_result = await loop.run_in_executor(
+                None,
+                volcengine_search_sync,
+                f"今天{today_str}科技行业和AI领域有什么重大新闻？包括OpenAI、Google、阿里巴巴、字节跳动等公司的最新动态。请列出最重要的5条新闻，每条包含标题和简短摘要。"
+            )
+            result["news_search"] = news_result
+        except Exception as e:
+            result["errors"]["news_search"] = str(e)
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
 

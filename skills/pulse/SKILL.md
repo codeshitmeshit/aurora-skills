@@ -37,11 +37,11 @@ description: >
 cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 ```
 
-返回一个 JSON，包含 `producthunt`、`github_trending`、`hacker_news`、`weather`、`podcasts` 数据——全部并行获取。
+返回一个 JSON，包含 `producthunt`、`github_trending`、`hacker_news`、`weather`、`podcasts`、`news_search` 数据——全部并行获取。
 
-- **直接使用预取数据**用于 Step 2、3、4a、4d、5 —— 不要再调用 `web_fetch`。
+- **直接使用预取数据**用于 Step 2、3、4a、4b、4d、5 —— 不要再调用 `web_fetch`。
 - 如果某个数据源的 `error` 字段不为 null，对该数据源回退到 `web_fetch`/`web_search`。
-- Step 4b（科技公司新闻）、4c（AI 行业新闻）仍使用 `web_search`。
+- 天气数据来自**高德天气 API**（国内稳定），新闻搜索来自**火山引擎联网搜索 API**。
 
 ---
 
@@ -79,16 +79,18 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 1. 挑选 **3-5 条**与科技/AI/开发者最相关的高质量讨论。
 2. 跳过纯招聘帖、Show HN 中不够重大的项目。
 
-#### 4b: 科技公司重要新闻
+#### 4b: 科技公司 & AI 行业新闻
 
-1. `web_search` 搜索当天重要科技新闻（阿里巴巴、字节跳动、OpenAI、Google、Apple 等）。
-2. 只关注：财报、重大产品发布、领导层变动、监管行动、收购、裁员等。
-3. 如果没有重大新闻，**跳过**此小节——不要凑数。
+**数据源**：使用 `prefetch.news_search`（火山引擎联网搜索结果）。包含 `content`（AI 生成的新闻摘要）和 `references`（来源链接）。
 
-#### 4c: AI 行业新闻
+1. 从 `content` 中提取重大新闻条目。
+2. 结合 `references` 中的链接作为来源。
+3. 只保留真正重大的新闻：财报、重大产品发布、领导层变动、监管行动、收购、新模型发布、重大研究突破。
+4. 如果没有重大新闻，**跳过**此小节——不要凑数。
 
-1. `web_search` 搜索 `AI news today` 和 `AI 新闻 最新`。
-2. 关注：新模型发布、重大研究突破、行业融资、监管动态。
+#### ~~4c: AI 行业新闻~~
+
+已合并到 4b（火山引擎搜索同时覆盖科技公司和 AI 新闻��。
 
 #### 4d: 播客更新
 
@@ -110,7 +112,7 @@ cd <skill_directory>/scripts && python3 prefetch.py 2>/dev/null
 
 ### Step 5: 天气数据
 
-**数据源**：使用 `prefetch.weather`。每个城市（北京/上海/南京）包含 `today` 和 `tomorrow`，各有 `high`、`low`、`desc`、`emoji`。
+**数据源**：使用 `prefetch.weather`。每个城市包含 `now`（实况）、`today` 和 `tomorrow`，各有 `high`、`low`、`desc`、`emoji`、`wind`。天气数据来自高德天气 API。
 
 格式：列表（非表格），每个城市显示今明两天，含 emoji、描述、低温°C ~ 高温°C。
 
