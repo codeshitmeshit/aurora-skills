@@ -222,8 +222,6 @@ shownotes 摘要（1-2 句简体中文重点总结）。
 {综合四座城市天气，给出雨伞、防晒、洗车等建议}
 
 ---
-
-> ✨ Powered by [Aurora Skills](https://github.com/codeshitmeshit/aurora-skills) for [OpenClaw](https://github.com/openclaw/openclaw)
 ```
 
 ### 格式规则
